@@ -9,10 +9,10 @@ import imutils
 import sys
 sys.path.append('/usr/lib/python3/dist-packages')
 
-import curses
-
-import RPi.GPIO as GPIO
 import time
+
+import wavePWM
+import pigpio
 
 ##stepper setup section
 delaytime = 0.2/1000.0
@@ -32,10 +32,6 @@ xdeadband = 2
 xgain = 4
 ygain = 4
 
-GPIO.setmode(GPIO.BCM)
-
-
-
 
 # Create the haar cascade
 profileCascade = cv2.CascadeClassifier("lbpcascade_profileface.xml")
@@ -46,7 +42,7 @@ font = cv2.FONT_HERSHEY_SIMPLEX
 # initialize the camera and grab a reference to the raw camera capture
 camera = PiCamera()
 camera.resolution = (160, 120)
-camera.framerate = 13
+camera.framerate = 5
 
 time.sleep(1)
 camera.iso = 800
@@ -55,24 +51,22 @@ camera.exposure_mode = 'off'
 rawCapture = PiRGBArray(camera, size=camera.resolution)
 
 # capture frames from the camera
+pi = pigpio.pi()
+if not pi.connected:
+  exit(0)
+  
+pwm = wavePWM.PWM(pi) # Use default frequency
 
 def main():
     
-    GPIO.setup(pwr_ind_pin, GPIO.OUT)
-    GPIO.setup(move_ind_pin, GPIO.OUT)
-    GPIO.setup(laser_pin, GPIO.OUT)
-    GPIO.setup(pit_dir_pin, GPIO.OUT)
-    GPIO.setup(pit_step_pin, GPIO.OUT)
-    GPIO.setup(yaw_dir_pin, GPIO.OUT)
-    GPIO.setup(yaw_step_pin, GPIO.OUT)
-
-    GPIO.output(laser_pin,0)
-
-
     #start execution 
-    GPIO.output(pwr_ind_pin,1)
+    pi.write(pwr_ind_pin,1)
     print("Steppers enabled")
-    
+
+    #zero motion in case it's moving
+    move(0, pit_dir_pin, pit_step_pin)
+    move(0, yaw_dir_pin, yaw_step_pin)
+
     xctr = camera.resolution[0]/2
     yctr = camera.resolution[1]/2
     print("resx: ", xctr, " resy: ", yctr)
@@ -108,10 +102,19 @@ def main():
             print("x: ",int(x+w/2), "y: ", int(y+h/2))
             
             #motion
-            if abs(yloc - yctr) > ydeadband:
-                move(delaytime, -1*int((yloc - yctr)*ygain), pit_dir_pin, pit_step_pin)
-            if abs(xloc - xctr) > xdeadband:
-                move(delaytime, -1*(int(xloc - xctr)*xgain), yaw_dir_pin, yaw_step_pin)
+            y_stepfreq = -1*int((yloc - yctr)*ygain)
+            if y_stepfreq == 0:
+               pi.write(move_ind_pin, 0)
+            elif y_stepfreq != 0:
+               pi.write(move_ind_pin, 1)
+            move(y_stepfreq, pit_dir_pin, pit_step_pin)
+            
+            x_stepfreq = -1*(int(xloc - xctr)*xgain)
+            if x_stepfreq == 0:
+               pi.write(move_ind_pin, 0)
+            elif x_stepfreq != 0:
+               pi.write(move_ind_pin, 1)
+            move(x_stepfreq, yaw_dir_pin, yaw_step_pin)
 
 
         
@@ -133,33 +136,40 @@ def main():
         elif key == ord('o'):
             laser(0)
 
-def move(delay, stepnum, dir_pin, step_pin):
-  if stepnum > 0:
-    dirval = 1
-  else:
-    dirval = 0
-    stepnum = -1* stepnum
+def move(stepfreq, dir_pin, step_pin):
+  if stepfreq > 0:
+    pi.write(dir_pin, 1)
+    cycle = 0.5
+  elif stepfreq == 0:
+    stepfreq = 0.1 #can't give zero
+    cycle = 0.0
+  else: #moving in negative
+    pi.write(dir_pin, 0)
+    stepfreq = abs(stepfreq)
+    cycle = 0.5
     
-  GPIO.output(move_ind_pin,1)
-  for i in range(0, stepnum):
-    GPIO.output(dir_pin, dirval)
-    GPIO.output(step_pin, 1)
-    time.sleep(delay)
-    GPIO.output(step_pin, 0)
-    time.sleep(delay)
-  GPIO.output(move_ind_pin,0)
+  pwm.set_frequency(stepfreq)
+  pwm.set_pulse_start_and_length_in_fraction(step_pin, 0.0, cycle)
+  pwm.update() # Apply all the changes.
+    
+
   
 def laser(signal):
     if signal > 0:
         sig = 1
     else:
         sig = 0
-    GPIO.output(laser_pin,sig)
+    pi.write(laser_pin,sig)
   
 def leave():
     print('Exiting')
-    GPIO.output(pwr_ind_pin,0)
-    GPIO.cleanup()
+    pi.write(pwr_ind_pin,0)
+    pi.write(laser_pin, 0)
+    
+    pwm.cancel()
+
+    pi.stop()
+    
  
 if __name__ == '__main__':
     main()

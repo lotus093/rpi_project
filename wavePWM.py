@@ -299,8 +299,9 @@ if __name__ == "__main__":
    import pigpio
    import wavePWM
 
-   GPIO=[5, 6, 7, 8, 9, 10, 11, 12]
-
+   #GPIO=[5, 6, 7, 8, 9, 10, 11, 12]
+   GPIO = [12]
+    
    pi = pigpio.pi()
 
    if not pi.connected:
@@ -312,81 +313,43 @@ if __name__ == "__main__":
    """
    pwm = wavePWM.PWM(pi) # Use default frequency
 
-   try:
+   slewtime = 3
+   waittime = 0
 
-      for i in range(1000, 5400, 200):
+   pi.write(13,1)
+   time.sleep(2)
+   
+   pwm.set_frequency(0.5)
+   while 1: 
+   
+       try:
 
-         if i % 400:
-            pwm.set_frequency(i)
-         else:
-            pwm.set_cycle_time(1000000.0/i)
+              pi.write(20,0)
+              pwm.set_pulse_start_and_length_in_fraction(21, 0.0, 0.5)
+              pwm.update() # Apply all the changes.
+              time.sleep(slewtime)
+              
+              pwm.set_pulse_start_and_length_in_fraction(21, 0.0, 0.0)
+              pwm.update()
+              time.sleep(waittime)
 
-         cl = pwm.get_cycle_length()
+              pi.write(20,1)
+              pwm.set_pulse_start_and_length_in_fraction(21, 0.0, 0.5)
+              pwm.update()
+              time.sleep(slewtime)
 
-         # Method 1.
-         pwm.set_pulse_start_in_micros(5, cl/10)
-         pwm.set_pulse_length_in_micros(5, cl/2)
+              pwm.set_pulse_start_and_length_in_fraction(21, 0.0, 0.0)
+              pwm.update()
+              time.sleep(waittime)          
 
-         # Method 2.
-         pwm.set_pulse_start_and_length_in_micros(6, cl/10, cl/2)
-
-         # Method 3.
-         pwm.set_pulse_start_in_fraction(7, 0.1)
-         pwm.set_pulse_length_in_fraction(7, 0.5)
-
-         # Method 4.
-         pwm.set_pulse_start_and_length_in_fraction(8, 0.1, 0.5)
-
-         # Method 1.
-         pwm.set_pulse_start_in_micros(9, 4*cl/10)
-         pwm.set_pulse_length_in_micros(9, cl/2)
-
-         # Method 2.
-         pwm.set_pulse_start_and_length_in_micros(10, 4*cl/10, cl/2)
-
-         # Method 2.
-         pwm.set_pulse_start_in_fraction(11, 0.4)
-         pwm.set_pulse_length_in_fraction(11, 0.5)
-
-         # Method 4.
-         pwm.set_pulse_start_and_length_in_fraction(12, 0.4, 0.5)
-
-         pwm.update() # Apply all the changes.
-
-         time.sleep(0.05)
-
-      for g in GPIO:
-
-            pwm.set_pulse_length_in_micros(g, 0)
-
-      pwm.update()
-
-      time.sleep(1)
-
-      # Now a servo example
-
-      pwm.set_frequency(50)
-
-      pos = 0
-
-      for g in GPIO:
-
-            pwm.set_pulse_start_in_micros(g, pos)
-            pos += 1000
-
-      for i in range(500, 2501, 3):
-
-         for g in GPIO:
-            pwm.set_pulse_length_in_micros(g, i)
-
-         pwm.update()
-
-   except KeyboardInterrupt:
-      pass
+       except KeyboardInterrupt:
+          break
 
    print("\ntidying up")
 
    pwm.cancel()
+   pi.write(12,0)
+   pi.write(13,0)
 
    pi.stop()
 
